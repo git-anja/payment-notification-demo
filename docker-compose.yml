@@ -1,0 +1,146 @@
+services:
+  kafka:
+    image: apache/kafka:3.8.1
+    container_name: demo-kafka
+    ports:
+      - "9094:9094"
+    environment:
+      - KAFKA_NODE_ID=0
+      - KAFKA_PROCESS_ROLES=controller,broker
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Pre-creates the topic so notification-service never joins the consumer group
+  # before the topic exists (that races into a 0-partition assignment that never
+  # self-heals until an unrelated rebalance).
+  kafka-init:
+    image: apache/kafka:3.8.1
+    container_name: demo-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092
+      --create --if-not-exists --topic payment-success-events
+      --partitions 3 --replication-factor 1
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: demo-postgres
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: payment_demo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d payment_demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: demo-redis
+    ports:
+      - "6379:6379"
+
+  payment-service:
+    build: ./services/payment-service
+    container_name: payment-service
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://demo:demo@postgres:5432/payment_demo?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: payment-success-events
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  notification-service:
+    build: ./services/notification-service
+    container_name: notification-service
+    environment:
+      PORT: "8081"
+      DATABASE_URL: postgres://demo:demo@postgres:5432/payment_demo?sslmode=disable
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: payment-success-events
+      KAFKA_GROUP: notification-service
+      AMAZON_URL: http://amazon-mock:8082/webhook
+      UDEMY_URL: http://udemy-mock:8083/webhook
+      MAX_ATTEMPTS: "5"
+      BASE_DELAY_SECONDS: "2"
+      CIRCUIT_FAILURE_THRESHOLD: "3"
+      CIRCUIT_OPEN_SECONDS: "15"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      amazon-mock:
+        condition: service_started
+      udemy-mock:
+        condition: service_started
+    ports:
+      - "8081:8081"
+
+  amazon-mock:
+    build: ./services/client-mock
+    container_name: amazon-mock
+    environment:
+      PORT: "8082"
+      CLIENT_NAME: amazon
+    ports:
+      - "8082:8082"
+
+  udemy-mock:
+    build: ./services/client-mock
+    container_name: udemy-mock
+    environment:
+      PORT: "8083"
+      CLIENT_NAME: udemy
+    ports:
+      - "8083:8083"
+
+  frontend:
+    build: ./frontend
+    container_name: notification-ui
+    depends_on:
+      - payment-service
+      - notification-service
+      - amazon-mock
+      - udemy-mock
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:

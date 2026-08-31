@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose *)",
+      "Bash(docker run *)",
+      "Bash(curl -s -m 5 localhost:8081/api/notifications)",
+      "Bash(curl -s -m 5 -X POST localhost:8080/api/payments -H 'Content-Type: application/json' -d '{\"clientId\":\"amazon\",\"orderId\":\"ord-1\",\"amount\":4999,\"currency\":\"USD\"}')",
+      "Bash(curl -s localhost:8081/api/notifications)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -X POST localhost:8083/api/toggle)",
+      "Bash(curl -s -m 5 -X POST localhost:8080/api/payments -H 'Content-Type: application/json' -d '{\"clientId\":\"udemy\",\"orderId\":\"ord-2\",\"amount\":1999,\"currency\":\"USD\"}')",
+      "Bash(curl -s localhost:8081/api/circuit/udemy)",
+      "Bash(curl -s localhost:8083/api/status)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST localhost:8083/webhook -H 'Content-Type: application/json' -d '{}')"
+    ]
+  }
+}
