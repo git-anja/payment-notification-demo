@@ -77,3 +77,7 @@ Redis is included as the fast distributed-state component for the demo stack. Th
 - Metrics, tracing and alerting
 - Webhook payload versioning
 - Idempotency-Key on every webhook
+<img width="1600" height="997" alt="WhatsApp Image 2026-08-31 at 5 30 18 PM" src="https://github.com/user-attachments/assets/e55ddcf6-529e-4c09-842e-edc1b6cf2814" />
+
+
+
